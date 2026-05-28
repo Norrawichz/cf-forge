@@ -102,6 +102,33 @@ export default function App() {
   const [selectedTopic, setSelectedTopic] = useState(null);
   const [topicSort, setTopicSort] = useState("rating");
 
+  const [aiInsights, setAiInsights] = useState(null);
+  const [aiLoading, setAiLoading] = useState(false);
+  const [aiError, setAiError] = useState(null);
+
+  const fetchAiInsights = useCallback(async () => {
+    if (!analysis || !info) return;
+    setAiLoading(true); setAiError(null);
+    try {
+      const res = await fetch("/api/analyze", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          rating: info.rating || 0,
+          rank: rankFor(info.rating || 0).name,
+          weakTopics: weakTopics.map((t) => ({ tag: t.tag, success: t.success })),
+          tagStats: analysis.tagStats.slice(0, 20),
+        }),
+      });
+      if (!res.ok) throw new Error("API error");
+      setAiInsights(await res.json());
+    } catch (e) {
+      setAiError(e.message || "Failed to get AI insights");
+    } finally {
+      setAiLoading(false);
+    }
+  }, [analysis, info, weakTopics]);
+
   /* ----- initial batched fetch ----- */
   const loadHandle = useCallback(async (h) => {
     if (!h.trim()) return;
@@ -470,6 +497,8 @@ export default function App() {
                 info={info} rank={rank} ratingChart={ratingChart}
                 analysis={analysis} weakTopics={weakTopics}
                 recommendations={recommendations} bankReady={problemBank.length > 0}
+                aiInsights={aiInsights} aiLoading={aiLoading} aiError={aiError}
+                onFetchAi={fetchAiInsights}
               />
             )}
             {page === "topics" && (
@@ -489,7 +518,7 @@ export default function App() {
 /* ===========================================================================
    DASHBOARD PAGE
 =========================================================================== */
-function Dashboard({ info, rank, ratingChart, analysis, weakTopics, recommendations, bankReady }) {
+function Dashboard({ info, rank, ratingChart, analysis, weakTopics, recommendations, bankReady, aiInsights, aiLoading, aiError, onFetchAi }) {
   const spotlight = recommendations[0];
   const queue = recommendations.slice(1, 6);
 
@@ -660,6 +689,68 @@ function Dashboard({ info, rank, ratingChart, analysis, weakTopics, recommendati
             </>
           ) : (
             <Empty text="No unsolved problems found in your target band. Try competing to update your rating." />
+          )}
+        </div>
+      </Card>
+      {/* AI Insights */}
+      <Card className="overflow-hidden border-violet-500/20">
+        <div className="border-b border-white/[0.06] bg-gradient-to-r from-violet-500/10 to-transparent px-5 py-3 flex items-center justify-between">
+          <h3 className="flex items-center gap-2 text-sm font-semibold text-violet-300">
+            <Sparkles className="h-4 w-4" /> AI Learning Path
+          </h3>
+          {!aiInsights && (
+            <button
+              onClick={onFetchAi}
+              disabled={aiLoading}
+              className="flex items-center gap-1.5 rounded-lg bg-violet-600 px-3 py-1.5 text-xs font-medium text-white transition hover:bg-violet-500 disabled:opacity-40"
+            >
+              {aiLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Zap className="h-3.5 w-3.5" />}
+              {aiLoading ? "Analyzing…" : "Analyze with AI"}
+            </button>
+          )}
+          {aiInsights && (
+            <button onClick={onFetchAi} disabled={aiLoading}
+              className="text-[11px] text-gray-600 hover:text-gray-400 transition">
+              {aiLoading ? "Refreshing…" : "Refresh"}
+            </button>
+          )}
+        </div>
+        <div className="p-5">
+          {!aiInsights && !aiLoading && !aiError && (
+            <p className="text-sm text-gray-600 text-center py-4">
+              กด "Analyze with AI" เพื่อให้ Gemini วิเคราะห์จุดอ่อนและแนะนำ learning path
+            </p>
+          )}
+          {aiError && (
+            <div className="flex items-center gap-2 rounded-lg border border-red-500/20 bg-red-500/5 p-3 text-sm text-red-300">
+              <AlertCircle className="h-4 w-4 shrink-0" /> {aiError}
+            </div>
+          )}
+          {aiLoading && !aiInsights && (
+            <div className="flex items-center justify-center gap-2 py-8 text-sm text-gray-500">
+              <Loader2 className="h-4 w-4 animate-spin" /> Gemini กำลังวิเคราะห์…
+            </div>
+          )}
+          {aiInsights && (
+            <div className="space-y-5">
+              <p className="text-sm text-gray-300 leading-relaxed">{aiInsights.analysis}</p>
+              <div>
+                <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-gray-500">Learning Path</p>
+                <div className="space-y-2">
+                  {(aiInsights.learningPath || []).map((step) => (
+                    <div key={step.priority} className="flex items-start gap-3 rounded-lg border border-white/[0.04] bg-white/[0.02] px-4 py-3">
+                      <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-violet-500/20 text-[11px] font-bold text-violet-300">
+                        {step.priority}
+                      </span>
+                      <div>
+                        <p className="font-mono text-sm font-medium text-gray-200">{step.topic}</p>
+                        <p className="mt-0.5 text-xs text-gray-500">{step.reason}</p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
           )}
         </div>
       </Card>
