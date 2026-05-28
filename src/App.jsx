@@ -281,7 +281,10 @@ export default function App() {
           tagStats: analysis.tagStats.slice(0, 20),
         }),
       });
-      if (!res.ok) throw new Error("API error");
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.error || `HTTP ${res.status}`);
+      }
       setAiInsights(await res.json());
     } catch (e) {
       setAiError(e.message || "Failed to get AI insights");
