@@ -106,29 +106,6 @@ export default function App() {
   const [aiLoading, setAiLoading] = useState(false);
   const [aiError, setAiError] = useState(null);
 
-  const fetchAiInsights = useCallback(async () => {
-    if (!analysis || !info) return;
-    setAiLoading(true); setAiError(null);
-    try {
-      const res = await fetch("/api/analyze", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          rating: info.rating || 0,
-          rank: rankFor(info.rating || 0).name,
-          weakTopics: weakTopics.map((t) => ({ tag: t.tag, success: t.success })),
-          tagStats: analysis.tagStats.slice(0, 20),
-        }),
-      });
-      if (!res.ok) throw new Error("API error");
-      setAiInsights(await res.json());
-    } catch (e) {
-      setAiError(e.message || "Failed to get AI insights");
-    } finally {
-      setAiLoading(false);
-    }
-  }, [analysis, info, weakTopics]);
-
   /* ----- initial batched fetch ----- */
   const loadHandle = useCallback(async (h) => {
     if (!h.trim()) return;
@@ -289,6 +266,29 @@ export default function App() {
     scored.sort((a, b) => b.weakScore - a.weakScore);
     return scored.slice(0, 3);
   }, [analysis, info, tagFrequency]);
+
+  const fetchAiInsights = useCallback(async () => {
+    if (!analysis || !info) return;
+    setAiLoading(true); setAiError(null);
+    try {
+      const res = await fetch("/api/analyze", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          rating: info.rating || 0,
+          rank: rankFor(info.rating || 0).name,
+          weakTopics: weakTopics.map((t) => ({ tag: t.tag, success: t.success })),
+          tagStats: analysis.tagStats.slice(0, 20),
+        }),
+      });
+      if (!res.ok) throw new Error("API error");
+      setAiInsights(await res.json());
+    } catch (e) {
+      setAiError(e.message || "Failed to get AI insights");
+    } finally {
+      setAiLoading(false);
+    }
+  }, [analysis, info, weakTopics]);
 
   /* ----- recommendation engine ----- */
   const recommendations = useMemo(() => {
