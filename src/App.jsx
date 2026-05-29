@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo, useCallback } from "react";
+import { CURATED_PROBLEMS } from "./curatedProblems";
 import {
   LineChart, Line, BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer,
   CartesianGrid, Cell,
@@ -99,6 +100,9 @@ export default function App() {
   const [submissions, setSubmissions] = useState([]);
   const [problemBank, setProblemBank] = useState([]);
 
+  const [recMode, setRecMode] = useState("weakness");
+  const [problemStats, setProblemStats] = useState([]);
+
   const [selectedTopic, setSelectedTopic] = useState(null);
   const [topicSort, setTopicSort] = useState("rating");
 
@@ -133,6 +137,7 @@ export default function App() {
         try {
           const pb = await cfFetch(`problemset.problems`);
           setProblemBank(pb.problems || []);
+          setProblemStats(pb.problemStatistics || []);
         } catch { /* degrade gracefully */ }
       }
 
@@ -270,9 +275,15 @@ export default function App() {
   const recommendations = useMemo(() => {
     if (!analysis || !problemBank.length) return [];
     const cur = info?.rating || 900;
-    const lo = cur ? cur + 100 : 800;
-    const hi = cur ? cur + 300 : 1100;
+    const lo   = recMode === "ceiling" ? cur + 400 : cur + 100;
+    const hi   = recMode === "ceiling" ? cur + 500 : cur + 300;
+    const target = recMode === "ceiling" ? cur + 450 : cur + 200;
     const weakTagSet = new Set(weakTopics.map((t) => t.tag));
+
+    const solvedCountMap = new Map();
+    for (const s of problemStats) {
+      solvedCountMap.set(`${s.contestId}-${s.index}`, s.solvedCount);
+    }
 
     const pool = problemBank.filter((p) => {
       if (p.contestId == null || !p.rating) return false;
@@ -282,16 +293,24 @@ export default function App() {
     });
 
     const scored = pool.map((p) => {
+      const key = `${p.contestId}-${p.index}`;
       const tagMatch = (p.tags || []).filter((t) => weakTagSet.has(t)).length;
-      const closeness = 1 - Math.abs(p.rating - (cur + 200)) / 300;
-      const score = tagMatch * 2 + closeness;
+      const closeness = 1 - Math.abs(p.rating - target) / (hi - lo);
+      const solvedCount = solvedCountMap.get(key) ?? 0;
+      const topicSize = (p.tags || []).length;
+      const score =
+        tagMatch * 2.5
+        + closeness
+        + Math.log10(solvedCount + 10) * 0.8
+        + (CURATED_PROBLEMS.has(key) ? 1.5 : 0)
+        + topicSize * 0.5;
       const weakHit = (p.tags || []).find((t) => weakTagSet.has(t));
-      return {
-        ...p, key: `${p.contestId}-${p.index}`, score,
-        reason: weakHit
-          ? `Targets your weak topic "${weakHit}", rated ${p.rating} (~${p.rating - cur} above you)`
-          : `Solid practice at ${p.rating} (~${p.rating - cur} above your current rating)`,
-      };
+      let reason = weakHit
+        ? `Targets your weak topic "${weakHit}", rated ${p.rating} (~${p.rating - cur} above you)`
+        : `Solid practice at ${p.rating} (~${p.rating - cur} above your current rating)`;
+      if (CURATED_PROBLEMS.has(key)) reason += ` · ${CURATED_PROBLEMS.get(key)} pick`;
+      if (solvedCount > 5000) reason += ` · popular (${Math.round(solvedCount / 1000)}k solved)`;
+      return { ...p, key, score, reason };
     });
     scored.sort((a, b) => b.score - a.score || a.rating - b.rating);
     const seen = new Set(); const out = [];
@@ -301,7 +320,7 @@ export default function App() {
       if (out.length >= 30) break;
     }
     return out;
-  }, [analysis, problemBank, info, weakTopics]);
+  }, [analysis, problemBank, info, weakTopics, recMode, problemStats]);
 
   /* ----- AI picks: auto-fetch when heuristic pool is ready ----- */
   useEffect(() => {
@@ -511,6 +530,7 @@ export default function App() {
                 analysis={analysis} weakTopics={weakTopics}
                 recommendations={recommendations} bankReady={problemBank.length > 0}
                 aiRecs={aiRecs} aiRecsLoading={aiRecsLoading}
+                recMode={recMode} setRecMode={setRecMode}
               />
             )}
             {page === "topics" && (
@@ -530,7 +550,7 @@ export default function App() {
 /* ===========================================================================
    DASHBOARD PAGE
 =========================================================================== */
-function Dashboard({ info, rank, ratingChart, analysis, weakTopics, recommendations, bankReady, aiRecs, aiRecsLoading }) {
+function Dashboard({ info, rank, ratingChart, analysis, weakTopics, recommendations, bankReady, aiRecs, aiRecsLoading, recMode, setRecMode }) {
   const displayRecs = aiRecs.length >= 3 ? aiRecs : recommendations.slice(0, 6);
   const usingAi = aiRecs.length >= 3;
   const spotlight = displayRecs[0];
@@ -657,7 +677,19 @@ function Dashboard({ info, rank, ratingChart, analysis, weakTopics, recommendati
             <Sparkles className="h-4 w-4" /> Solve Now
             {usingAi && <span className="rounded-md bg-violet-500/20 px-1.5 py-0.5 text-[10px] font-medium text-violet-300">AI picks</span>}
           </h3>
-          {aiRecsLoading && <Loader2 className="h-3.5 w-3.5 animate-spin text-gray-600" />}
+          <div className="flex items-center gap-2">
+            {aiRecsLoading && <Loader2 className="h-3.5 w-3.5 animate-spin text-gray-600" />}
+            <div className="flex gap-1">
+              <button onClick={() => setRecMode("weakness")}
+                className={`rounded-md px-2.5 py-1 text-xs transition ${
+                  recMode === "weakness" ? "bg-indigo-500/15 text-indigo-300" : "text-gray-500 hover:text-gray-300"
+                }`}>Train weakness</button>
+              <button onClick={() => setRecMode("ceiling")}
+                className={`rounded-md px-2.5 py-1 text-xs transition ${
+                  recMode === "ceiling" ? "bg-indigo-500/15 text-indigo-300" : "text-gray-500 hover:text-gray-300"
+                }`}>Push ceiling</button>
+            </div>
+          </div>
         </div>
         <div className="p-5">
           {!bankReady ? (
@@ -757,6 +789,11 @@ function Topics({ topics, selectedTopic, setSelectedTopic, topicProblems, topicS
                   {p.isRec && (
                     <span className="flex shrink-0 items-center gap-1 rounded bg-indigo-500/15 px-1.5 py-0.5 text-[10px] font-medium text-indigo-300">
                       <Sparkles className="h-2.5 w-2.5" /> pick
+                    </span>
+                  )}
+                  {CURATED_PROBLEMS.has(p.key) && (
+                    <span className="flex shrink-0 items-center gap-1 rounded bg-purple-500/15 px-1.5 py-0.5 text-[10px] font-medium text-purple-300">
+                      community
                     </span>
                   )}
                 </div>
